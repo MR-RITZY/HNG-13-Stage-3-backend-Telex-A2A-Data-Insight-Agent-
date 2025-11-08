@@ -144,4 +144,8 @@ class AIParsedInstruction(BaseModel):
     fill: Optional[Literal["ffill", "bfill"] | str] = None
     sort: Optional[List[Literal["ascending", "descending"] | str]] = None
     filters: Optional[Dict[str, Any]] = None
+    analysis_explanation: Optional[str] = Field(
+        default=None,
+        description="A concise detailed comprehensive explanation of the required analysis"
+    )
     confidence: float = 0.0

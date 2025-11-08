@@ -276,6 +276,8 @@ class Analysis:
                 self.errors["visual_error"] = visual_error
             return charts
 
+    def explanation_handler(self, explanation: str):
+        return ResponseMessagePart(kind="text", text=explanation)
 
     def analyse(self, df: DataFrame, data: AIParsedInstruction, metadata: dict):
         metadata = returning_metadata(metadata)
@@ -307,7 +309,12 @@ class Analysis:
             "visualization": lambda: self.handle_visualization(df, data.operations),
         }
 
+
         message_parts, art = [], []
+        if data.analysis_explanation:
+            text_explanation = self.explanation_handler(data.analysis_explanation)
+            message_parts.append(text_explanation)
+            
         for intent in data.intent:
             if intent in intent_handlers:
                 result = intent_handlers[intent]()
