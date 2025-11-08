@@ -1,0 +1,27 @@
+[project]
+name = "data-insight_agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "MR-RITZY", email = "mrboffin01@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.120.4",
+    "httpx>=0.28.1",
+    "matplotlib>=3.10.7",
+    "minio>=7.2.18",
+    "pandas>=2.3.3",
+    "pydantic-settings>=2.11.0",
+    "seaborn>=0.13.2",
+    "spacy>=3.8.7",
+    "uvicorn>=0.38.0",
+]
+
+[project.scripts]
+data-insight = "data_insight:main"
+
+[build-system]
+requires = ["uv_build>=0.9.7,<0.10.0"]
+build-backend = "uv_build"
