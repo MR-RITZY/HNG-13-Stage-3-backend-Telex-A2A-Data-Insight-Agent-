@@ -9,14 +9,15 @@ It performs **automated data analysis, visualization, and insight generation** o
 
 Guru acts as the **Data Intelligence Brain** of Telex — it receives analysis requests via A2A messages, processes datasets, generates insights, and returns structured responses.
 
-It is powered by **FastAPI**, **pandas**, **matplotlib**, and **MinIO**, with optional **spaCy** integration for natural language instruction parsing.
+It is majorly powered by **FastAPI**, **pandas**, **matplotlib**, **MinIO**, **spaCy** (integration for natural language instruction parsing) and **an LLM Model** **Qwen2.5:7b** for interpretation of client's request.
 
 ---
 
 ## 🧩 Key Features
 
 - 📊 **Automated Data Insights** – correlation, regression, and statistical operations  
-- 🧠 **Instruction Parsing** – understands user requests using NLP (spaCy)  
+- 🧠 **Instruction Parsing** – validates and parses user requests using NLP (spaCy), Pydantic and some other underlying logics 
+- 🧠 **Instruction Interpretation** - understands user requests using Qwen2.5:7b prompting with a strict schema
 - 🧮 **Data Analysis Engine** – powered by pandas and numpy  
 - 📈 **Visualizations** – bar, line, scatter, histogram charts, etc.  
 - ☁️ **Artifact Storage** – chart uploads via MinIO (S3-compatible storage)  
@@ -26,8 +27,6 @@ It is powered by **FastAPI**, **pandas**, **matplotlib**, and **MinIO**, with op
 ---
 
 ## 🏗️ Architecture
-
-
 
 User / Another Telex Agent
 │
@@ -40,30 +39,26 @@ Telex Platform
 Guru Agent (FastAPI)
 │
 ├── NLP & Instruction Parsing (spaCy)
+├── LLM, Prompt Engineering & Instruction Interpretation (Qwen 2.5:7b)
 ├── Data Analysis Engine (pandas, numpy)
 ├── Visualization Layer (matplotlib)
 ├── Storage Layer (MinIO)
 └── Response Packaging (Telex-compatible schema)
 
-Always show details
-
 ---
 
-
 ## 🗂️ Project Structure
-
-
 
 data_insight_agent/
 ├── main.py # FastAPI entry point
 ├── schema.py # Pydantic models for Telex A2A message schemas
 ├── analysis.py # Core data analysis and visualization logic
 ├── utils.py # Helper utilities (e.g., regression, metadata)
-├── storage/
-│ └── minio_client.py # MinIO client setup and artifact upload management
+├── minio_client.py # MinIO client setup and artifact upload management
+├── prompt.py # AI Prompting
+├── ollama_client.py #Ollama client setup, AI model-to-agent interactions and instruction interpretation
 └── requirements.txt # Python dependencies
 
-Always show details
 
 ---
 
@@ -72,15 +67,15 @@ Always show details
 
 | Component | Technology | Purpose |
 |------------|-------------|----------|
-| **Backend Framework** | FastAPI | RESTful API and async request handling |
+| **Backend Framework** | FastAPI | RESTful API and async request handling | Pydantic and Pydantic-settings |
 | **Data Processing** | pandas, numpy | Data manipulation and computation |
 | **Visualization** | matplotlib | Chart and graph generation |
+| **Prompt Engineering & LLM Model** | Qwen 2.5:7b | Prompt Engineering and AI-to-agent Interactions
 | **Storage** | MinIO | S3-compatible object storage for artifacts |
 | **NLP Parsing** | spaCy | Instruction understanding (via `en_core_web_sm`) |
 | **Packaging** | uv | Modern dependency and environment manager |
 
 ---
-
 
 ## 🧠 Core Workflow
 
@@ -91,6 +86,9 @@ Always show details
 
 2. **Parse Instruction**  
    spaCy processes the text to extract the task type and parameters.
+
+3. **Interprete Query**  
+   Qwen 2.5:7b interpretes the user query and return it a strictly schematized json format
 
 3. **Perform Analysis**  
    The dataset is loaded into pandas, and the requested operation (e.g., correlation, regression) is executed.
@@ -106,11 +104,10 @@ Always show details
 
 ---
 
-
 ## 🧰 Setup and Installation
 
 ### 1️⃣ Clone the Repository
-```bash
+
 git clone https://github.com/<your-username>/guru-data-insight-agent.git
 cd guru-data-insight-agent
 
@@ -118,9 +115,7 @@ cd guru-data-insight-agent
 
 Using uv (recommended):
 
-Always show details
 uv sync
-
 
 Or using pip:
 
@@ -208,12 +203,9 @@ All artifacts are uploaded as binary streams to MinIO.
 
 Faruq Alabi Bashir
 Backend Engineer | Data Insight Developer
-GitHub: @<your-username>
+GitHub: [https://github.com/MR-RITZY](https://github.com/MR-RITZY)
 
-Email: yourname@example.com
+Email: [faruqbashir608@gmail.com](mrboffin01@gmail.com)
 
-📝 License
-
-This project is licensed under the MIT License — you are free to use, modify, and distribute with attribution.
 
 “Data is not just numbers — Guru helps you see the story it tells.”
