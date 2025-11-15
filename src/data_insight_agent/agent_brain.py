@@ -18,18 +18,19 @@ from data_insight_agent.utils import (
     is_gibberish_or_non_analytical,
     extract_json_from_text,
     validate_upload_file,
-    get_text_and_file
+    get_text_and_file,
 )
 from data_insight_agent.analysis import Analysis
 from data_insight_agent.prompt import get_prompt
 from data_insight_agent.config import settings
 from data_insight_agent.ai_schema import AIParsedInstruction
 
+
 class DataInsightEngine:
     def __init__(self, ollama: AsyncClient):
         self.ollama = ollama
 
-    async def parse_input(self, data:dict) -> dict | None:
+    async def parse_input(self, data: dict) -> dict | None:
         text, file = data.get("text"), data.get("file")
         if text:
             json_data, actual_text = extract_json_from_text(text)
@@ -77,31 +78,26 @@ class DataInsightEngine:
             )
         return metadata
 
- 
-    
     async def data_interpreter(self, data: dict):
         prompt = get_prompt(data)
 
-        response = await self.ollama.post(settings.AI_MODEL_URL,
+        response = await self.ollama.post(
+            settings.AI_MODEL_URL,
             json={"model": settings.AI_MODEL, "prompt": prompt, "stream": False},
         )
 
         if response.status_code == 200:
             raw_text = response.json().get("response", "")
             if raw_text:
-                print(f"AI Interpretation Immediately Before Json Decoding : {raw_text}")
-                print("--------"*20)
+
                 try:
                     parsed_json = json.loads(repair_json(raw_text))
-                    print(f"AI Interpretation After Json and Before Schema Validation : {parsed_json}")
-                    print("--------"*20)
+
                     valid_body = AIParsedInstruction(**parsed_json)
-                    print(f"AI Interpretation After Schema Validation: {valid_body}")
-                    print("--------"*20)
+
                     return valid_body
                 except Exception:
-                        return None
-        
+                    return None
 
     async def analyse(self, messages: A2AMessages, context_id: str, task_id: str):
         message = messages[-1] if messages else None
@@ -110,7 +106,8 @@ class DataInsightEngine:
         metadata = {
             "original_text_input": (
                 message.parts[-1].text if message.parts[-1].text else None
-            )}
+            )
+        }
         context_id = context_id or str(uuid4())
         task_id = task_id or str(uuid4())
         data = get_text_and_file(message)
@@ -119,19 +116,15 @@ class DataInsightEngine:
         if df is None or df.empty:
             return None, {"error": "Failed to interpret user request."}
         metadata.update(self.extract_metadata(parsed_data))
-        ai_data= await self.data_interpreter(metadata)
+        ai_data = await self.data_interpreter(metadata)
         if not ai_data:
-            return None, {"error": "Failed to interpret user request."}        
+            return None, {"error": "Failed to interpret user request."}
         analysis = Analysis(context_id=context_id, task_id=task_id)
         analysed_data = analysis.analyse(df, ai_data, metadata)
         errors = analysis.errors
-        print("--------"*20)
-        print(analysed_data)
-        print(errors)
-        print("--------"*20)
 
         local_analysis = self.generate_explanation(analysed_data)
-        print(local_analysis)
+
         analysed_data["local_analysis"] = local_analysis
         local_analysis_part = ResponseMessagePart(kind="text", text=local_analysis)
 
@@ -169,7 +162,6 @@ class DataInsightEngine:
 
         return result, errors
 
-    
     def get_dtypes(self, df: pd.DataFrame):
         dtypes_info = {
             "columns": {},
@@ -202,7 +194,6 @@ class DataInsightEngine:
 
         return dtypes_info
 
-   
     def generate_explanation(self, analysed_data):
         metadata = analysed_data.get("metadata") or {}
         rows = metadata.get("num_rows", "?")
@@ -214,9 +205,11 @@ class DataInsightEngine:
             stat_vals = math_stats.get(stat)
             if stat_vals:
                 parts.append(f"\n📈 {stat.title()} values:")
-                for col, val in (stat_vals.items() if isinstance(stat_vals, dict) else []):
+                for col, val in (
+                    stat_vals.items() if isinstance(stat_vals, dict) else []
+                ):
                     try:
-                        if val is None or (isinstance(val, float) and (val != val)): 
+                        if val is None or (isinstance(val, float) and (val != val)):
                             s = "NaN"
                         else:
                             s = f"{float(val):.2f}"
@@ -297,7 +290,6 @@ class DataInsightEngine:
         if total > 0:
             parts.append(f"\n⚠️ Detected {total} anomaly{'ies' if total != 1 else ''}.")
 
-        
         visuals = analysed_data.get("visuals generated") or []
         if visuals:
             parts.append(

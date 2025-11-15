@@ -27,8 +27,9 @@ app = FastAPI(lifespan=lifespan)
 
 
 @app.post("/telex/a2a/data-insight-agent")
-async def a2a_endpoint(request: Request, ollama: Annotated[AsyncClient, Depends(get_ollama)]):
-    start = time.time()
+async def a2a_endpoint(
+    request: Request, ollama: Annotated[AsyncClient, Depends(get_ollama)]
+):
     try:
         body = await request.json()
         rpc_request = JSONRPCRequest(**body)
@@ -93,6 +94,4 @@ async def a2a_endpoint(request: Request, ollama: Annotated[AsyncClient, Depends(
                 }
             ),
         )
-    end = time.time()
-    print(f"Time of operation: {end-start}")
     return response

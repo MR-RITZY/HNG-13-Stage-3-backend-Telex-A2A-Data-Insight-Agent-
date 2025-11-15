@@ -1,161 +1,174 @@
-# 🧠 Guru – Data Insight Agent for Telex Platform
+# 🧠 **Guru – Data Insight Agent for the Telex Platform**
 
-**Guru** is an intelligent backend agent built for the **Telex Platform (A2A ecosystem)**.  
-It performs **automated data analysis, visualization, and insight generation** on structured datasets, returning meaningful summaries and artifacts that can be consumed by other agents or users within Telex.
-
----
-
-## 🚀 Overview
-
-Guru acts as the **Data Intelligence Brain** of Telex — it receives analysis requests via A2A messages, processes datasets, generates insights, and returns structured responses.
-
-It is majorly powered by **FastAPI**, **pandas**, **matplotlib**, **MinIO**, **spaCy** (integration for natural language instruction parsing) and **an LLM Model** **Qwen2.5:7b** for interpretation of client's request.
+**Guru** is an intelligent backend agent built for the **Telex Platform (A2A ecosystem)**.
+It performs **automated data analysis, visualization, instruction interpretation, and insight generation** on structured datasets, returning meaningful summaries and artifacts that can be consumed by other agents or users within Telex.
 
 ---
 
-## 🧩 Key Features
+## 🚀 **Overview**
 
-- 📊 **Automated Data Insights** – correlation, regression, and statistical operations  
-- 🧠 **Instruction Parsing** – validates and parses user requests using NLP (spaCy), Pydantic and some other underlying logics 
-- 🧠 **Instruction Interpretation** - understands user requests using Qwen2.5:7b prompting with a strict schema
-- 🧮 **Data Analysis Engine** – powered by pandas and numpy  
-- 📈 **Visualizations** – bar, line, scatter, histogram charts, etc.  
-- ☁️ **Artifact Storage** – chart uploads via MinIO (S3-compatible storage)  
-- 🔗 **A2A Integration** – communicates seamlessly with the Telex platform  
-- ⚙️ **Modular Design** – cleanly separated modules for analysis, storage, schemas, and utils  
+Guru acts as the **Data Intelligence Brain** of Telex — receiving analysis requests via A2A messages, interpreting user instructions with both NLP and LLMs, processing datasets, generating insights, and returning rich, structured responses.
+
+It is powered by **FastAPI**, **pandas**, **matplotlib**, **MinIO**, **spaCy**, and an **LLM model: Qwen2.5-7B** for high-level instruction understanding.
 
 ---
 
-## 🏗️ Architecture
+## 🧩 **Key Features**
 
+* 📊 **Automated Data Insights** — correlation, regression, quantiles, summary statistics, and more
+* 🧠 **Instruction Parsing (NLP)** — spaCy + custom logic to extract intent and parameters
+* 🤖 **Instruction Interpretation (LLM)** — Qwen2.5-7B with strict schema-constrained prompting
+* 🧮 **Data Analysis Engine** — pandas + numpy
+* 📈 **Visualizations** — bar, line, scatter, histogram, and more using matplotlib
+* ☁️ **Artifact Storage** — MinIO (S3-compatible), with automatic upload and URL generation
+* 🔗 **A2A Integration** — seamless communication within the Telex platform
+* 🧱 **Modular Design** — clean architecture with separation between analysis, schema, storage, and LLM logic
+
+---
+
+## 🏗️ **Architecture**
+
+```
 User / Another Telex Agent
-│
-▼
-Telex Platform
-│
-(A2A Message Exchange)
-│
-▼
-Guru Agent (FastAPI)
-│
-├── NLP & Instruction Parsing (spaCy)
-├── LLM, Prompt Engineering & Instruction Interpretation (Qwen 2.5:7b)
-├── Data Analysis Engine (pandas, numpy)
-├── Visualization Layer (matplotlib)
-├── Storage Layer (MinIO)
-└── Response Packaging (Telex-compatible schema)
+           │
+           ▼
+       Telex Platform
+           │
+   (A2A Message Exchange)
+           │
+           ▼
+     Guru Agent (FastAPI)
+           │
+           ├── NLP & Instruction Parsing (spaCy)
+           ├── Instruction Interpretation (Qwen2.5-7B)
+           ├── Data Analysis Engine (pandas, numpy)
+           ├── Visualization Layer (matplotlib)
+           ├── Storage Layer (MinIO)
+           └── Response Packaging (Telex-compatible schemas)
+```
 
 ---
 
-## 🗂️ Project Structure
+## 🗂️ **Project Structure**
 
+```
 data_insight_agent/
-├── main.py # FastAPI entry point
-├── schema.py # Pydantic models for Telex A2A message schemas
-├── analysis.py # Core data analysis and visualization logic
-├── utils.py # Helper utilities (e.g., regression, metadata)
-├── minio_client.py # MinIO client setup and artifact upload management
-├── prompt.py # AI Prompting
-├── ollama_client.py #Ollama client setup, AI model-to-agent interactions and instruction interpretation
-└── requirements.txt # Python dependencies
-
-
----
-
-
-## ⚙️ Tech Stack
-
-| Component | Technology | Purpose |
-|------------|-------------|----------|
-| **Backend Framework** | FastAPI | RESTful API and async request handling | Pydantic and Pydantic-settings |
-| **Data Processing** | pandas, numpy | Data manipulation and computation |
-| **Visualization** | matplotlib | Chart and graph generation |
-| **Prompt Engineering & LLM Model** | Qwen 2.5:7b | Prompt Engineering and AI-to-agent Interactions
-| **Storage** | MinIO | S3-compatible object storage for artifacts |
-| **NLP Parsing** | spaCy | Instruction understanding (via `en_core_web_sm`) |
-| **Packaging** | uv | Modern dependency and environment manager |
+├── main.py              # FastAPI entry point
+├── schema.py            # Pydantic models for Telex A2A message formats
+├── analysis.py          # Core analysis and visualization logic
+├── utils.py             # Helper utilities (regression, metadata extraction)
+├── minio_client.py      # MinIO client + artifact upload
+├── prompt.py            # LLM prompt templates and schema definitions
+├── ollama_client.py     # Ollama client + model interactions
+└── requirements.txt     # Project dependencies
+```
 
 ---
 
-## 🧠 Core Workflow
+## ⚙️ **Tech Stack**
 
-1. **Receive Request**  
-   Guru receives an A2A message from the Telex Platform containing:  
-   - Dataset (or its URL)  
-   - Analysis instruction (e.g., *“Find correlation between sales and profit”*)
-
-2. **Parse Instruction**  
-   spaCy processes the text to extract the task type and parameters.
-
-3. **Interprete Query**  
-   Qwen 2.5:7b interpretes the user query and return it a strictly schematized json format
-
-3. **Perform Analysis**  
-   The dataset is loaded into pandas, and the requested operation (e.g., correlation, regression) is executed.
-
-4. **Visualize Results**  
-   Matplotlib generates a chart or plot relevant to the analysis.
-
-5. **Store Artifacts**  
-   Charts and other outputs are uploaded to MinIO, and their URLs are recorded.
-
-6. **Respond to Telex**  
-   Guru packages results into a structured Telex-compatible response (JSON + artifacts).
+| Component               | Technology                           | Purpose                                          |
+| ----------------------- | ------------------------------------ | ------------------------------------------------ |
+| **Backend Framework**   | FastAPI, Pydantic, Pydantic-Settings | API + validation + configuration                 |
+| **Data Processing**     | pandas, numpy                        | Data manipulation and computation                |
+| **Visualization**       | matplotlib                           | Plot and chart generation                        |
+| **LLM / AI Layer**      | Qwen2.5-7B (via Ollama)              | Instruction interpretation, structured reasoning |
+| **NLP Parsing**         | spaCy (`en_core_web_sm`)             | Intent and parameter extraction                  |
+| **Storage**             | MinIO                                | S3-compatible artifact storage                   |
+| **Environment Manager** | uv                                   | Modern dependency + environment management       |
 
 ---
 
-## 🧰 Setup and Installation
+## 🧠 **Core Workflow**
 
-### 1️⃣ Clone the Repository
+1. **Receive Request**
+   Guru receives an A2A message containing:
 
+   * Dataset (file or URL)
+   * Natural language instruction
+
+2. **Parse Instruction**
+   spaCy extracts task intent, numeric references, and column mentions.
+
+3. **Interpret Query (LLM)**
+   Qwen2.5-7B converts the instruction into a **strictly-defined JSON schema** understood by Guru.
+
+4. **Perform Analysis**
+   pandas loads the dataset and executes the requested operation.
+
+5. **Visualize Results**
+   matplotlib generates relevant charts.
+
+6. **Store Artifacts**
+   Binary chart outputs are uploaded to MinIO; URLs are returned.
+
+7. **Respond to Telex**
+   Guru returns structured JSON compatible with Telex A2A message formats.
+
+---
+
+## 🧰 **Setup and Installation**
+
+### **1️⃣ Clone the Repository**
+
+```
 git clone https://github.com/<your-username>/guru-data-insight-agent.git
 cd guru-data-insight-agent
+```
 
-2️⃣ Install Dependencies
+### **2️⃣ Install Dependencies**
 
-Using uv (recommended):
+Using **uv** (recommended):
 
+```
 uv sync
+```
 
-Or using pip:
+Or with **pip**:
 
-Always show details
+```
 pip install -r requirements.txt
+```
 
-3️⃣ Set Up Environment Variables
+### **3️⃣ Create Environment Variables**
 
-Create a .env file in the project root:
+Create a `.env` file:
 
-Always show details
+```
 MINIO_ENDPOINT=localhost:9000
 MINIO_ACCESS_KEY=your_access_key
 MINIO_SECRET_KEY=your_secret_key
 MINIO_BUCKET_NAME=guru-artifacts
+```
 
-4️⃣ Run the Server
-Always show details
+### **4️⃣ Run the Server**
+
+```
 uv run uvicorn data_insight_agent.main:app --reload
+```
 
+Guru will be available at:
 
-Guru should now be available at:
+```
+http://127.0.0.1:8000 (Test with PostMan)
+```
 
-Always show details
-http://127.0.0.1:8000
+---
 
-🧠 Example Flow
+## 🧠 **Example Flow**
 
-Input (A2A message):
+### **Input (A2A Message)**
 
-Always show details
+```
 {
   "instruction": "Show a regression between age and income",
   "dataset_url": "https://example.com/people.csv"
 }
+```
 
+### **Output (Response to Telex)**
 
-Output (Response to Telex):
-
-Always show details
+```
 {
   "message": "Regression between age and income completed successfully.",
   "artifact": {
@@ -164,48 +177,46 @@ Always show details
   },
   "summary": "Income increases linearly with age up to mid-40s."
 }
+```
 
-🧩 Example Visualization Types
+---
 
-bar – Category comparisons
+## 📊 **Visualization Types Supported**
 
-line – Trends over time
+* **bar** — category comparison
+* **line** — trends over time
+* **scatter** — correlations
+* **hist** — distributions
 
-scatter – Correlation analysis
+Guru uses a **clean dictionary-based visualization dispatch**, avoiding repetitive `if/else` blocks.
 
-hist – Distribution visualization
+---
 
-Guru uses a clean dictionary-based dispatch for visualization selection instead of repetitive conditionals.
+## 🧱 **Development Notes**
 
-🧱 Development Notes
+* Developed on **Linux (WSL)**
+* Managed using **uv** for clean environment isolation
+* `pipx` used for external tools (Jupyter, uv)
+* All artifacts uploaded to MinIO as **binary streams**
+* Strict schema enforcement for LLM responses
+* Modularized for future expansion and plug-in operations
 
-Developed on Linux (WSL).
+---
 
-Managed via uv for environment isolation.
+## 🔮 **Future Improvements**
 
-pipx used for global CLI tools like jupyter and uv.
+* 🔗 Automated A2A registration & handshake
+* 🧠 More advanced NLP models for richer parsing
+* 📊 Support for multi-dataset comparative analysis
+* 📈 Optional integration with Plotly/Seaborn for enhanced visuals
+* 📝 Insight summarization via hybrid rule-based + LLM reasoning
 
-All artifacts are uploaded as binary streams to MinIO.
+---
 
-🔮 Future Improvements
+## 👨‍💻 **Author**
 
-🔗 Full Telex A2A registration and handshake automation
+**Faruq Alabi Bashir**
+Backend Engineer • Data Insight Developer
 
-🧠 Smarter NLP model for complex query parsing
-
-🪄 Support for multi-dataset comparative analysis
-
-📊 Integration with Plotly or Seaborn for richer visualizations
-
-🧾 Insight summarization via LLM or rule-based text generation
-
-🧑‍💻 Author
-
-Faruq Alabi Bashir
-Backend Engineer | Data Insight Developer
 GitHub: [https://github.com/MR-RITZY](https://github.com/MR-RITZY)
-
-Email: [faruqbashir608@gmail.com](mrboffin01@gmail.com)
-
-
-“Data is not just numbers — Guru helps you see the story it tells.”
+Email: [faruqbashir608@gmail.com](mailto:faruqbashir608@gmail.com)

@@ -3,7 +3,8 @@ services:
     container_name: data_insight_agent
     build: .
     depends_on:
-      - ollama
+      ollama:
+        condition: service_healthy
     ports:
       - 8000:8000
     env_file:
@@ -23,11 +24,20 @@ services:
     environment:
       - OLLAMA_HOST=0.0.0.0
     entrypoint: >
-      sh -c "ollama serve & sleep 5 && ollama pull qwen2.5:7b && wait"
+      sh -c "ollama serve & 
+      pid=$$! &&
+      echo 'Waiting for Ollama to start...' &&
+      sleep 10 &&
+      echo 'Pulling qwen2.5:7b model...' &&
+      ollama pull qwen2.5:7b &&
+      echo 'Model pulled successfully' &&
+      wait $$pid"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   ollama_data:
-
-
-
-  
