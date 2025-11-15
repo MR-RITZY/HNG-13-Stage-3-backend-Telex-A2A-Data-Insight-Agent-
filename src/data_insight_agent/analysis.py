@@ -1,19 +1,21 @@
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import seaborn as sns
 from uuid import uuid4
 from pandas import DataFrame
 from typing import List, Dict, Any, Optional
-from minio import Minio
 import io
+import boto3
 import pandas as pd
 
-from data_insight_agent.schema import (
+
+from data_insight_agent.ai_schema import (
     AIParsedInstruction,
     Correlation,
     Regression,
-    Operation,
-    ResponseMessagePart,
-    Artifact,
+    Visuals,
+    Maths,
+    Quantile,
 )
 from data_insight_agent.utils import simple_linear_regression, returning_metadata
 from data_insight_agent.config import settings
@@ -24,15 +26,17 @@ class Analysis:
         self.context_id = context_id
         self.task_id = task_id
         self.errors = {}
-        self.minio_client = Minio(
-            settings.MINIO_ENDPOINT,
-            access_key=settings.MINIO_ACCESS_KEY,
-            secret_key=settings.MINIO_SECRET_KEY,
-            secure=False,
+        self.b2_client = boto3.client(
+            "s3",
+            endpoint_url=settings.B2_ENDPOINT,
+            aws_access_key_id=settings.B2_KEY_ID,
+            aws_secret_access_key=settings.B2_APPLICATION_KEY,
+            region_name="us-east-005",
         )
 
+
     @staticmethod
-    def filter_by(df: DataFrame, filters: Dict[str, Any]) -> DataFrame:
+    def filter_by(df: DataFrame, filters: Optional[Dict[str, Any]] = None) -> DataFrame:
         if not filters:
             return df
         for key, value in filters.items():
@@ -45,14 +49,14 @@ class Analysis:
         return df
 
     @staticmethod
-    def focus_columns(df: DataFrame, cols: List[str]) -> DataFrame:
+    def focus_columns(df: DataFrame, cols: Optional[List[str]] = None) -> DataFrame:
         if not cols:
             return df
         existing_cols = [col for col in cols if col in df.columns]
         return df[existing_cols]
 
     @staticmethod
-    def fill(df: DataFrame, filling: Optional[str]) -> DataFrame:
+    def fill(df: DataFrame, filling: Optional[str] = None) -> DataFrame:
         if not filling:
             return df
         if filling == "ffill":
@@ -63,7 +67,7 @@ class Analysis:
             return df.fillna(filling)
 
     @staticmethod
-    def drop(df: DataFrame, action: Optional[str]) -> DataFrame:
+    def drop(df: DataFrame, action: Optional[str] = None) -> DataFrame:
         if not action:
             return df
         if action == "drop null":
@@ -73,7 +77,7 @@ class Analysis:
         return df
 
     @staticmethod
-    def sorting(df: DataFrame, sort_params: Optional[List[str]]) -> DataFrame:
+    def sorting(df: DataFrame, sort_params: Optional[List[str]] = None) -> DataFrame:
         if not sort_params:
             return df
         ascending = True
@@ -89,16 +93,26 @@ class Analysis:
             df = df.sort_values(by=cols, ascending=ascending)
         return df
 
-    def ensure_bucket_exists(self):
-        if not self.minio_client.bucket_exists(settings.MINIO_BUCKET):
-            self.minio_client.make_bucket(settings.MINIO_BUCKET)
+    def upload_chart_to_b2(self, fig: Figure, filename: str) -> str:
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format="png")
+        buffer.seek(0)
+        plt.close(fig)
+        self.b2_client.upload_fileobj(
+            Fileobj=buffer,
+            Bucket=settings.B2_BUCKET,
+            Key=filename,
+            ExtraArgs={"ContentType": "image/png"},
+        )
+
+        return f"{settings.B2_ENDPOINT}/{settings.B2_BUCKET}/{filename}"
 
     def visualize(self, df: DataFrame, chart_type: str):
         plt.figure(figsize=(8, 5))
         self.ensure_bucket_exists()
 
         try:
-            df = df.apply(pd.to_numeric, errors="ignore")
+            df = df.apply(pd.to_numeric)
 
             numeric_cols = df.select_dtypes(include="number").columns.tolist()
             categorical_cols = df.select_dtypes(exclude="number").columns.tolist()
@@ -176,22 +190,10 @@ class Analysis:
             if chart_type in chart_handlers:
                 chart_handlers[chart_type]()
                 plt.tight_layout()
-
-                buffer = io.BytesIO()
-                plt.savefig(buffer, format="png")
-                buffer.seek(0)
-                plt.close("all")
-
+                fig = plt.gcf()
                 filename = f"{self.context_id}/{self.task_id}/{uuid4()}.png"
-                self.minio_client.put_object(
-                    settings.MINIO_BUCKET,
-                    filename,
-                    buffer,
-                    length=buffer.getbuffer().nbytes,
-                    content_type="image/png",
-                )
-                path = f"{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/{filename}"
-                return chart_type, path
+                path = self.upload_chart_to_b2(fig, filename)
+                return {chart_type: path}
 
         except Exception as e:
             plt.close("all")
@@ -199,43 +201,53 @@ class Analysis:
 
     def handle_summary(self, df: DataFrame):
         result = df.describe(include="all").to_dict()
-        return ResponseMessagePart(kind="data", data=result)
+        return result
 
-    def handle_math(self, df: DataFrame, operations: Operation):
+    def handle_math(self, df: DataFrame, math_ops: Optional[Maths] = None):
         result = {}
+        ops = []
+        if not math_ops:
+            return result
+        numeric_df = df.select_dtypes(include="number")
         try:
-            math_ops = [op for op in operations.math if op != "quantile"]
-            if math_ops:
-                result.update(df.agg(math_ops).to_dict())
+            for op in math_ops:
+                if isinstance(op, Quantile):
+                    percentiles = op.percentiles or [0.25, 0.5, 0.75]
+                    result["quantile"] = numeric_df.quantile(
+                        percentiles, numeric_only=True
+                    ).to_dict()
+                else:
+                    ops.append(op)
+            if ops:
+                result.update(numeric_df.agg(ops).to_dict())
 
-            if "quantile" in operations.math:
-                percentiles = getattr(
-                    getattr(operations, "quantile", None), "percentile", None
-                ) or [0.25, 0.5, 0.75]
-                result["quantile"] = df.quantile(
-                    percentiles, numeric_only=True
-                ).to_dict()
         except Exception as e:
             self.errors["math_error"] = f"Math operation failed: {str(e)}"
-        return ResponseMessagePart(kind="data", data=result)
+        return {"math": result}
 
-    def handle_relationship(self, df: DataFrame, relationships):
+    def handle_correlation(self, df: DataFrame, corr: Optional[Correlation] = None):
         result = {}
         try:
-            for rel in relationships:
-                if isinstance(rel, Correlation):
-                    result["correlation"] = df.corr(
-                        numeric_only=True, method=rel.correlation
-                    ).to_dict()
-                elif isinstance(rel, Regression):
-                    result["regression"] = simple_linear_regression(
-                        df, rel.col_x, rel.col_y
-                    )
+            method = corr[0] if isinstance(corr, list) else corr
+            result["correlation"] = df.corr(numeric_only=True, method=method).to_dict()
         except Exception as e:
-            self.errors["relationship_error"] = (
-                f"Relationship analysis failed: {str(e)}"
-            )
-        return ResponseMessagePart(kind="data", data=result)
+            self.errors["correlation_error"] = f"Correlation analysis failed: {e}"
+        return result
+
+    def handle_regression(self, df: DataFrame, regres: Optional[Regression] = None):
+        result = {}
+        if not regres:
+            return result
+        try:
+            regression = simple_linear_regression(df, regres.col_x, regres.col_y)
+            error = regression.get("error")
+            if error:
+                self.errors["regression_error"] = error
+                return result
+            result["regression"] = regression
+        except Exception as e:
+            self.errors["regression_error"] = f"Regression analysis failed: {str(e)}"
+            return result
 
     def handle_anomaly(self, df: DataFrame):
         result = {}
@@ -246,17 +258,12 @@ class Analysis:
             result["zscore_anomalies"] = anomalies.to_dict()
         except Exception as e:
             self.errors["anomaly_error"] = f"Anomaly detection failed: {str(e)}"
-        return ResponseMessagePart(kind="data", data=result)
+        return result
 
-    def handle_visualization(self, df: DataFrame, operations: Operation):
-        chart_types = []
-        if getattr(operations, "visualization", None):
-            chart_types = (
-                operations.visualization
-                if isinstance(operations.visualization, list)
-                else [operations.visualization]
-            )
-
+    def handle_visualization(self, df: DataFrame, visuals: Optional[Visuals] = None):
+        if not visuals:
+            return None
+        chart_types = visuals if isinstance(visuals, list) else [visuals]
         if chart_types:
             charts = []
             visual_error = []
@@ -264,66 +271,78 @@ class Analysis:
                 chart_or_error = self.visualize(df, chart_type)
                 if isinstance(chart_or_error, str):
                     visual_error.append(chart_or_error)
-                elif isinstance(chart_or_error, tuple):
+                elif isinstance(chart_or_error, dict):
                     chart = chart_or_error
-                    artifact = Artifact(
-                        artifactId=str(uuid4()),
-                        name=chart[0],
-                        parts=ResponseMessagePart(kind="file", file_url=chart[1]),
-                    )
-                    charts.append(artifact)
+                    charts.append(chart)
             if visual_error:
                 self.errors["visual_error"] = visual_error
             return charts
 
-    def explanation_handler(self, explanation: str):
-        return ResponseMessagePart(kind="text", text=explanation)
-
     def analyse(self, df: DataFrame, data: AIParsedInstruction, metadata: dict):
+        analyses = {}
         metadata = returning_metadata(metadata)
         metadata["status"] = "in_progress"
 
-        if not data.intent or data.intent == "unknown" or data.confidence == 0:
+        if not data.intent or (data.intent == "unknown" and data.confidence == 0):
             metadata["summary"] = df.describe(include="all").to_dict()
             metadata["message"] = (
                 "Low confidence or unknown intent — default summary only."
             )
             metadata["status"] = "skipped"
-            return metadata, [ResponseMessagePart(kind="data", data=metadata)], []
+            analyses["metadata"] = metadata
+            return analyses
 
-        df = (
-            df.pipe(self.focus_columns, data.focus_columns or [])
-            .pipe(self.filter_by, data.filters or {})
-            .pipe(self.fill, data.fill)
-            .pipe(self.drop, data.drop)
-            .pipe(self.sorting, data.sort)
-        )
+        try:
+            df = (
+                df.pipe(self.focus_columns, data.focus_columns or [])
+                .pipe(self.filter_by, data.filters or {})
+                .pipe(self.fill, data.fill)
+                .pipe(self.drop, data.drop)
+                .pipe(self.sorting, data.sort)
+            )
+        except Exception as e:
+            print(f"Data Preparation Error: {e}")
+            self.errors["Data Preparation Error"] = e
 
         intent_handlers = {
             "summary": lambda: self.handle_summary(df),
-            "math": lambda: self.handle_math(df, data.operations),
-            "relationship": lambda: self.handle_relationship(
-                df, data.operations.relationship
+            "math": lambda: (
+                self.handle_math(df, data.operations.math)
+                if data.operations.math
+                else None
             ),
-            "anomaly": lambda: self.handle_anomaly(df),
-            "visualization": lambda: self.handle_visualization(df, data.operations),
+            "correlation": lambda: (
+                self.handle_correlation(df, data.operations.correlation)
+                if data.operations.correlation
+                else None
+            ),
+            "regression": lambda: (
+                self.handle_regression(df, data.operations.regression)
+                if isinstance(data.operations.regression, Regression)
+                else None
+            ),
+            "anomaly": lambda: (
+                self.handle_anomaly(df) if "anomaly" in data.intent else None
+            ),
+            "visualization": lambda: (
+                self.handle_visualization(df, data.operations.visualization)
+                if data.operations.visualization
+                else None
+            ),
         }
 
-
-        message_parts, art = [], []
         if data.analysis_explanation:
-            text_explanation = self.explanation_handler(data.analysis_explanation)
-            message_parts.append(text_explanation)
-            
+            text_explanation = data.analysis_explanation
+            analyses["overview of the analysis"] = text_explanation
+
         for intent in data.intent:
-            if intent in intent_handlers:
+            if intent in intent_handlers and intent_handlers[intent]:
                 result = intent_handlers[intent]()
                 if result:
                     if isinstance(result, list):
-                        art.extend(result)
+                        analyses["visuals generated"] = result
                     else:
-                        message_parts.append(result)
-
+                        analyses.update(result)
         metadata.update(
             {
                 "processed_columns": df.columns.tolist(),
@@ -332,5 +351,5 @@ class Analysis:
                 "status": "completed",
             }
         )
-
-        return metadata, message_parts, art
+        analyses["metadata"] = metadata
+        return analyses

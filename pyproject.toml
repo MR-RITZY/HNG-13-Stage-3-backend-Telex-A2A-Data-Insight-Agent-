@@ -8,11 +8,14 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "boto3>=1.40.74",
+    "en-core-web-sm",
     "fastapi>=0.120.4",
     "httpx>=0.28.1",
+    "json-repair>=0.53.0",
     "matplotlib>=3.10.7",
-    "minio>=7.2.18",
     "pandas>=2.3.3",
+    "pip>=25.3",
     "pydantic-settings>=2.11.0",
     "seaborn>=0.13.2",
     "spacy>=3.8.7",
@@ -25,3 +28,6 @@ data-insight = "data_insight:main"
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz" }

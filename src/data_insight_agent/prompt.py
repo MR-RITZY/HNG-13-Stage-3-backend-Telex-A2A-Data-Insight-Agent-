@@ -1,46 +1,37 @@
 from textwrap import dedent
-from data_insight_agent.schema import AIParsedInstruction
 from data_insight_agent.utils import ANALYTIC_INTENTS, ANALYTICAL_KEYWORDS
+from data_insight_agent.ai_schema import AIParsedInstruction
 
-def get_prompt(metadata: dict):
+def get_prompt(data: dict) -> str :
     return dedent(f"""
-    You are an assistant that interprets data analysis requests for a data insight agent.
-    You are a smart and strict parser that MUST output only a single JSON object that exactly matches the schema below.
-    Do not include explanations, commentary, or markdown formatting.
+    You are a strict and smart AI assistant for data analysis. 
+    Analyze the user request and dataset metadata, and output a single JSON  that conforms strictly and totally with schema specified
+    that strictly matches the following keys:
 
-    ---
-    🎯 Your Tasks:
-    1. Analyze the provided user query and dataset metadata.
-    2. Determine what kind of analysis or insight the user is asking for (intent).
-    3. Identify what operations or actions correspond to that intent.
-    4. Identify which columns and filters might be relevant.
-    5. Return a valid JSON object conforming strictly to the schema below.
+    - intent (list of analytic tasks: summary, math, correlation, regression, anomaly, visualization, unknown)
+    - operations (dict specifying actions per intent, e.g., math: ["sum", "mean", quantile: [0.40, 0.75]])
+    - focus_columns (list of relevant columns)
+    - group_by (list of columns for grouping)
+    - drop (optional: "drop null" or "drop duplicates")
+    - fill (optional: "ffill", "bfill", or value)
+    - sort (optional: list of "ascending"/"descending")
+    - filters (dict of column filters)
+    - analysis_explanation (optional string explaining the analysis)
+    - confidence (float between 0.0 and 1.0)
 
-    ---
-    📘 Schema:
-    {AIParsedInstruction.model_json_schema()}
-
-    ---
-    📊 Dataset Metadata Overview:
-    (Columns, dtypes, and summary)
-    {metadata}
-
-    ---
-    ⚙️ Available Analytic Intents:
+    --- Allowed analytic intents:
     {ANALYTIC_INTENTS}
 
-    ⚙️ Available Operations per Intent:
-    Each intent can have one or more actions. Use this mapping:
+    --- Allowed operations per intent:
     {ANALYTICAL_KEYWORDS}
 
-    Example mappings:
-    - "math": ["sum", "mean", "median"]
-    - "summary": ["describe", "overview"]
-    - "relationship": ["correlation", "regression"]
+     --- Schema which your response will be validated against:
+    {AIParsedInstruction}
 
-    ---
-    Example output:
-    ```json
+    --- Dataset metadata:
+    {data}
+
+    --- Example valid output:
     {{
         "intent": ["math"],
         "operations": {{"math": ["sum", "mean"]}},
@@ -48,15 +39,12 @@ def get_prompt(metadata: dict):
         "filters": {{"region": "West"}},
         "confidence": 0.88
     }}
-    ```
 
-    ---
-    🧠 Rules:
-    - Output ONLY valid JSON conforming to the schema.
-    - If you cannot confidently infer the intent, return:
-      {{"intent": ["unknown"], "confidence": 0.0}}
-    - Use `null` for missing or unknown fields.
-    - Choose numeric columns for mathematical intents, categorical for grouping, and datetime for time-based analyses.
-    - Confidence is a float between 0.0 and 1.0 representing how sure you are.
-    - Never output multiple JSON objects or text before/after it.
+    --- Rules:
+    1. Output must be valid JSON with all required keys.
+    2. Use only the allowed operations for each intent.
+    3. For every intent you pick, pick their corresponding required operations for reasonable analysis and vice versa
+    4. Populate optional fields with defaults if empty.
+    5. If unsure, return: {{"intent": ["unknown"], "confidence": 0.0}}.
+    6. Do not include explanations, markdown, or extra text.
     """)

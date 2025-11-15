@@ -5,7 +5,9 @@ import json
 import io
 import pandas as pd
 from fastapi import UploadFile
-from data_insight_agent.schema import RequestA2AMessage
+import numpy as np
+
+from data_insight_agent.rpc_schema import RequestA2AMessage
 
 
 nlp = spacy.load("en_core_web_sm")
@@ -13,13 +15,14 @@ nlp = spacy.load("en_core_web_sm")
 ANALYTIC_INTENTS = {
     "summary": "Summarize or describe data using descriptive statistics.",
     "math": "Compute or calculate mathematical functions such as totals, averages, or distributions.",
-    "relationship": "Find correlations, regressions, or relationships between variables.",
+    "correlation": "Find correlations between variables to show how related they are.",
+    "regression": "Find regression expression of two variables to show how related they are.",
     "anomaly": "Identify outliers or unusual patterns.",
     "visualization": "Create visual representations of data (charts, plots, trends).",
 }
 
 ANALYTICAL_KEYWORDS = {
-    "summary": "describe",
+    "summary": "summary",
     "math": [
         "sum",
         "min",
@@ -32,10 +35,8 @@ ANALYTICAL_KEYWORDS = {
         "quantile",
         "var",
     ],
-    "relationship": {
-        "correlation": ["pearson", "kendall", "spearman"],
-        "regression": ["x_column", "y_column"],
-    },
+    "correlation": ["pearson", "kendall", "spearman"],
+    "regression": ["col_x", "col_y"],
     "anomaly": "zscore",
     "visualization": ["bar", "line", "pie", "hist", "box", "heatmap", "scatter"],
 }
@@ -107,7 +108,6 @@ def is_valid_json_data(data: dict) -> bool:
         if not isinstance(value, (list, tuple)):
             return False
         lengths.append(len(value))
-
     return all(length == lengths[0] for length in lengths)
 
 
@@ -125,7 +125,6 @@ def extract_json_from_text(text: str):
                 return data, remaining_text
         except json.JSONDecodeError:
             continue
-
     return None, text.strip()
 
 
@@ -170,25 +169,30 @@ def get_text_and_file(A2AMessage: RequestA2AMessage):
     return data_dict
 
 
-import numpy as np
-
 
 def simple_linear_regression(df: pd.DataFrame, x_col: str, y_col: str):
     x = df[x_col].values
     y = df[y_col].values
     if len(x) == 0 or len(y) == 0:
         return {"error": "Empty data for regression."}
-    z = np.polyfit(x, y, 1)
-    slope, intercept = z
-    equ = np.poly1d(z)
+
+    slope, intercept = np.polyfit(x, y, 1)
+    y_pred = slope * x + intercept
+    ss_res = np.sum((y - y_pred) ** 2)
+    ss_tot = np.sum((y - np.mean(y)) ** 2)
+    r2 = 1 - (ss_res / ss_tot if ss_tot != 0 else 0)
+
     return {
-        "equation": equ,
-        "slope": slope,
-        "intercept": intercept,
+        "x_column": x_col,
+        "y_column": y_col,
+        "slope": float(slope),
+        "intercept": float(intercept),
+        "r2": float(r2),
+        "equation": f"{y_col} = {slope:.2f} * {x_col} + {intercept:.2f}",
     }
 
 
 def returning_metadata(metadata: dict) -> dict:
-        for key in ("original_text_input", "text_instruction"):
-            metadata.pop(key, None)
-        return metadata
+    for key in ("original_text_input", "text_instruction"):
+        metadata.pop(key, None)
+    return metadata

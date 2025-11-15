@@ -4,10 +4,10 @@ class Settings(BaseSettings):
     OLLAMA_URL: str
     AI_MODEL: str
     AI_MODEL_URL: str
-    MINIO_ENDPOINT: str 
-    MINIO_ACCESS_KEY: str
-    MINIO_SECRET_KEY: str
-    MINIO_BUCKET:str
+    B2_KEY_ID: str
+    B2_APPLICATION_KEY: str
+    B2_BUCKET: str
+    B2_ENDPOINT: str
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

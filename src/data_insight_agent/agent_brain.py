@@ -1,16 +1,15 @@
 import pandas as pd
 import numpy as np
-import json
 from uuid import uuid4
+import json
 from datetime import datetime, timezone
+from httpx import AsyncClient
+from json_repair import repair_json
 
-
-from data_insight_agent.schema import AIParsedInstruction
-from data_insight_agent.prompt import get_prompt
-from data_insight_agent.ollama_client import get_ollama
-from data_insight_agent.schema import (
+from data_insight_agent.rpc_schema import (
+    ResponseMessagePart,
     A2AMessages,
-    A2AMessage,
+    Artifact,
     TaskResult,
     TaskStatus,
     ResponseA2AMessage,
@@ -19,49 +18,46 @@ from data_insight_agent.utils import (
     is_gibberish_or_non_analytical,
     extract_json_from_text,
     validate_upload_file,
-    get_text_and_file,
+    get_text_and_file
 )
-
 from data_insight_agent.analysis import Analysis
-
+from data_insight_agent.prompt import get_prompt
+from data_insight_agent.config import settings
+from data_insight_agent.ai_schema import AIParsedInstruction
 
 class DataInsightEngine:
-    @staticmethod
-    async def parse_input(message: A2AMessage) -> dict | None:
-        data_dict = get_text_and_file(message)
-        text, file = data_dict.get("text"), data_dict.get("file")
+    def __init__(self, ollama: AsyncClient):
+        self.ollama = ollama
+
+    async def parse_input(self, data:dict) -> dict | None:
+        text, file = data.get("text"), data.get("file")
         if text:
             json_data, actual_text = extract_json_from_text(text)
             if file and json_data:
                 return None
             if actual_text and not is_gibberish_or_non_analytical(actual_text):
-                data_dict["text"] = actual_text
-
+                data["text"] = actual_text
             if json_data:
                 df = pd.DataFrame(json_data)
-                data_dict["data"] = df
+                data["data"] = df
+
         if file:
             df = await validate_upload_file(file)
-            if df:
-                data_dict["data"] = df
-        return data_dict
+            if df is not None:
+                data["data"] = df
+        return data
 
-    @staticmethod
-    async def extract_metadata(message: A2AMessage) -> dict:
-        metadata = {
-            "original_text_input": (
-                message.parts[-1].text if message.parts[-1].text else None
-            )
-        }
-        data_dict = await DataInsightEngine.parse_input(message)
-        df = data_dict.get("data")
-        text = data_dict.get("text")
+    def extract_metadata(self, data: dict) -> dict:
+        metadata = {}
+        df = data.get("data")
+        text = data.get("text")
         if text:
             metadata["text_instruction"] = text
-        if df:
+
+        if df is not None and not df.empty:
             shape = df.shape
             stat = df.describe(include="all").to_dict()
-            dtypes = DataInsightEngine.get_dtypes(df)
+            dtypes = self.get_dtypes(df)
             sample = df.head(5).to_dict(orient="records")
             total_missing = int(df.isna().sum().sum())
             percent_missing = round(
@@ -79,50 +75,89 @@ class DataInsightEngine:
                     "memory_usage_mb": memory_usage,
                 }
             )
-        return df, metadata
+        return metadata
 
-    @staticmethod
-    async def data_ai_model(message: A2AMessage):
-        df, metadata = await DataInsightEngine.extract_metadata(message)
-        prompt = get_prompt(metadata)
-        response = await get_ollama().post(
-            "/api/generate",
-            json={"model": "qwen2.5:7b", "prompt": prompt, "stream": False},
+ 
+    
+    async def data_interpreter(self, data: dict):
+        prompt = get_prompt(data)
+
+        response = await self.ollama.post(settings.AI_MODEL_URL,
+            json={"model": settings.AI_MODEL, "prompt": prompt, "stream": False},
         )
+
         if response.status_code == 200:
             raw_text = response.json().get("response", "")
             if raw_text:
+                print(f"AI Interpretation Immediately Before Json Decoding : {raw_text}")
+                print("--------"*20)
                 try:
-                    parsed_json = json.loads(raw_text)
+                    parsed_json = json.loads(repair_json(raw_text))
+                    print(f"AI Interpretation After Json and Before Schema Validation : {parsed_json}")
+                    print("--------"*20)
                     valid_body = AIParsedInstruction(**parsed_json)
-                    return df, valid_body, metadata
+                    print(f"AI Interpretation After Schema Validation: {valid_body}")
+                    print("--------"*20)
+                    return valid_body
                 except Exception:
-                    return None
+                        return None
+        
 
-    @staticmethod
-    async def analyse(messages: A2AMessages, context_id: str, task_id: str):
+    async def analyse(self, messages: A2AMessages, context_id: str, task_id: str):
         message = messages[-1] if messages else None
         if not message:
-            return None
+            return None, {"error": "No Message Body."}
+        metadata = {
+            "original_text_input": (
+                message.parts[-1].text if message.parts[-1].text else None
+            )}
         context_id = context_id or str(uuid4())
         task_id = task_id or str(uuid4())
-        df, ai_data, metadata = await DataInsightEngine.data_ai_model(message)
+        data = get_text_and_file(message)
+        parsed_data = await self.parse_input(data)
+        df = parsed_data.get("data", None)
+        if df is None or df.empty:
+            return None, {"error": "Failed to interpret user request."}
+        metadata.update(self.extract_metadata(parsed_data))
+        ai_data= await self.data_interpreter(metadata)
+        if not ai_data:
+            return None, {"error": "Failed to interpret user request."}        
         analysis = Analysis(context_id=context_id, task_id=task_id)
-        updated_metadata, message_parts, artifacts = analysis.analyse(
-            df, ai_data, metadata
-        )
-        message = ResponseA2AMessage(
+        analysed_data = analysis.analyse(df, ai_data, metadata)
+        errors = analysis.errors
+        print("--------"*20)
+        print(analysed_data)
+        print(errors)
+        print("--------"*20)
+
+        local_analysis = self.generate_explanation(analysed_data)
+        print(local_analysis)
+        analysed_data["local_analysis"] = local_analysis
+        local_analysis_part = ResponseMessagePart(kind="text", text=local_analysis)
+
+        response_message = ResponseA2AMessage(
             kind="message",
             role="system",
-            parts=message_parts,
+            parts=[local_analysis_part],
             messageId=str(uuid4()),
             taskId=task_id,
-            metadata=updated_metadata,
         )
-        messages.append(message)
+
+        visuals = analysed_data.get("visuals generated", [])
+        artifacts = []
+
+        for visual in visuals:
+            visual_type, path = list(visual.items())[0]
+            file_part = ResponseMessagePart(kind="file", file_url=path)
+            artifacts.append(
+                Artifact(artifactId=str(uuid4()), name=visual_type, parts=[file_part])
+            )
+
+        messages.append(response_message)
         task_status = TaskStatus(
-            state="completed", timestamp=datetime.now(tz=timezone.utc)
+            state="completed", timestamp=datetime.now(tz=timezone.utc).isoformat()
         )
+
         result = TaskResult(
             id=str(uuid4()),
             contextId=context_id,
@@ -131,11 +166,11 @@ class DataInsightEngine:
             history=messages,
             kind="task",
         )
-        errors = analysis.errors
+
         return result, errors
 
-    @staticmethod
-    def get_dtypes(df: pd.DataFrame):
+    
+    def get_dtypes(self, df: pd.DataFrame):
         dtypes_info = {
             "columns": {},
             "groups": {
@@ -166,3 +201,108 @@ class DataInsightEngine:
             dtypes_info["columns"][column] = dtype
 
         return dtypes_info
+
+   
+    def generate_explanation(self, analysed_data):
+        metadata = analysed_data.get("metadata") or {}
+        rows = metadata.get("num_rows", "?")
+        cols = len(metadata.get("processed_columns", []) or [])
+        parts = [f"📊 Analyzed {rows} records across {cols} columns."]
+
+        math_stats = analysed_data.get("math") or {}
+        for stat in ["mean", "median", "mode", "min", "max", "std"]:
+            stat_vals = math_stats.get(stat)
+            if stat_vals:
+                parts.append(f"\n📈 {stat.title()} values:")
+                for col, val in (stat_vals.items() if isinstance(stat_vals, dict) else []):
+                    try:
+                        if val is None or (isinstance(val, float) and (val != val)): 
+                            s = "NaN"
+                        else:
+                            s = f"{float(val):.2f}"
+                    except Exception:
+                        s = str(val)
+                    parts.append(f" • {col}: {s}")
+
+        quantiles = math_stats.get("quantile")
+        if quantiles:
+            parts.append("\n📊 Quantiles:")
+            sample_key = next(iter(quantiles), None)
+            sample_val = quantiles.get(sample_key) if sample_key is not None else None
+            if isinstance(sample_key, str) and isinstance(sample_val, dict):
+                for col, qmap in quantiles.items():
+                    if isinstance(qmap, dict):
+                        for q, val in qmap.items():
+                            try:
+                                qf = float(q)
+                                q_label = f"{qf * 100:.0f}th percentile"
+                            except Exception:
+                                q_label = str(q)
+                            try:
+                                s = f"{float(val):.2f}"
+                            except Exception:
+                                s = str(val)
+                            parts.append(f" • {col} ({q_label}): {s}")
+            else:
+                for q, colsmap in quantiles.items():
+                    try:
+                        qf = float(q)
+                        q_label = f"{qf * 100:.0f}th percentile"
+                    except Exception:
+                        q_label = str(q)
+                    if isinstance(colsmap, dict):
+                        for col, val in colsmap.items():
+                            try:
+                                s = f"{float(val):.2f}"
+                            except Exception:
+                                s = str(val)
+                            parts.append(f" • {col} ({q_label}): {s}")
+
+        corr = analysed_data.get("correlation") or {}
+        if corr:
+            parts.append("\n🔗 Correlations (|corr| > 0.6):")
+            for col1, sub in corr.items():
+                if not isinstance(sub, dict):
+                    continue
+                for col2, value in sub.items():
+                    try:
+                        corr_val = float(value)
+                    except Exception:
+                        continue
+                    if col1 != col2 and abs(corr_val) >= 0.6:
+                        parts.append(f" • {col1} ↔ {col2}: {corr_val:.2f}")
+
+        reg = analysed_data.get("regression") or {}
+        if reg:
+            x_col = reg.get("x_column", "x")
+            y_col = reg.get("y_column", "y")
+            parts.append(f"\n📐 Regression between {x_col} and {y_col}:")
+            if "equation" in reg:
+                parts.append(f" • Equation: {reg.get('equation')}")
+            for key in ("slope", "intercept", "r2"):
+                if key in reg:
+                    try:
+                        parts.append(f" • {key.title()}: {float(reg[key]):.2f}")
+                    except Exception:
+                        parts.append(f" • {key.title()}: {reg[key]}")
+
+        anomalies = analysed_data.get("zscore_anomalies") or {}
+        total = 0
+        if anomalies:
+            for v in anomalies.values():
+                try:
+                    total += len(v)
+                except Exception:
+                    pass
+        if total > 0:
+            parts.append(f"\n⚠️ Detected {total} anomaly{'ies' if total != 1 else ''}.")
+
+        
+        visuals = analysed_data.get("visuals generated") or []
+        if visuals:
+            parts.append(
+                f"\n🖼️ Generated {len(visuals)} visualization{'s' if len(visuals) != 1 else ''}."
+            )
+
+        analysis = "\n".join(parts)
+        return analysis

@@ -1,12 +1,17 @@
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, Depends
 from fastapi.responses import JSONResponse
-from pydantic.errors import PydanticInvalidForJsonSchema
+import time
+from typing import Annotated
+from httpx import AsyncClient
 
-
-
-from data_insight_agent.schema import JSONRPCRequest, JSONRPCResponse
+from data_insight_agent.rpc_schema import (
+    JSONRPCRequest,
+    JSONRPCResponse,
+    ExecuteParams,
+    MessageParams,
+)
 from contextlib import asynccontextmanager, AsyncExitStack
-from data_insight_agent.ollama_client import connect_to_ollama
+from data_insight_agent.ollama_client import connect_to_ollama, get_ollama
 from data_insight_agent.agent_brain import DataInsightEngine
 
 
@@ -21,12 +26,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-@app.post("telex/a2a/data-insight-agent")
-async def a2a_endpoint(request: Request):
+@app.post("/telex/a2a/data-insight-agent")
+async def a2a_endpoint(request: Request, ollama: Annotated[AsyncClient, Depends(get_ollama)]):
+    start = time.time()
     try:
-        body = request.json()
-        rpc_request = JSONRPCRequest(body)
-    except (PydanticInvalidForJsonSchema, Exception):
+        body = await request.json()
+        rpc_request = JSONRPCRequest(**body)
+    except Exception:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={
@@ -43,13 +49,31 @@ async def a2a_endpoint(request: Request):
     context_id = None
     task_id = None
 
-    if rpc_request.method == "message/send":
+    if rpc_request.method == "message/send" and isinstance(
+        rpc_request.params, MessageParams
+    ):
         messages = [rpc_request.params.message]
-    elif rpc_request.method == "execute":
+    elif rpc_request.method == "execute" and isinstance(
+        rpc_request.params, ExecuteParams
+    ):
         messages = rpc_request.params.messages
-        context_id = rpc_request.params.contextId
-        task_id = rpc_request.params.taskId
-    result, errors = await DataInsightEngine.analyse(messages, context_id, task_id)
+    else:
+        messages = []
+
+    if not messages or not any(m.parts for m in messages):
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "jsonrpc": "2.0",
+                "id": body.get("id"),
+                "error": {
+                    "code": -32600,
+                    "message": "Invalid or No message body provided",
+                },
+            },
+        )
+    data_engine = DataInsightEngine(ollama)
+    result, errors = await data_engine.analyse(messages, context_id, task_id)
 
     if result and errors:
         response = JSONRPCResponse(
@@ -69,5 +93,6 @@ async def a2a_endpoint(request: Request):
                 }
             ),
         )
-
+    end = time.time()
+    print(f"Time of operation: {end-start}")
     return response
